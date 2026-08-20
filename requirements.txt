@@ -23,6 +23,7 @@ opencv-python
 # Data science
 numpy
 pandas
+openpyxl
 scikit-learn
 matplotlib
 seaborn

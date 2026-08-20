@@ -1,5 +1,6 @@
 import logging
 import random
+import re
 from pathlib import Path
 from typing import Optional, List, Tuple
 
@@ -258,6 +259,21 @@ MORPH_KEYWORDS = [
 ]
 MORPH_LEVELS = ["l3_l4", "l4_l5", "l5_s1"]
 
+# The real "Radiologists Report.xlsx" (confirmed via Mendeley's file API,
+# 2026-08) is ONE free-text note per patient covering all levels together
+# (columns: "Patient ID", "Clinician's Notes") -- not one column per level
+# as originally assumed. These patterns split a note into per-level
+# segments (from one level mention to the next) before keyword-matching
+# each segment separately. Levels never mentioned in a note default to
+# "Normal" (absence-implies-normal is the common radiology-report
+# convention, but isn't universally true -- see the notebook's class-
+# distribution sanity check before trusting this on a new dataset).
+LEVEL_PATTERNS = {
+    "l3_l4": re.compile(r"l\s*3\s*[-/]\s*l?\s*4", re.I),
+    "l4_l5": re.compile(r"l\s*4\s*[-/]\s*l?\s*5", re.I),
+    "l5_s1": re.compile(r"l\s*5\s*[-/]\s*s?\s*1", re.I),
+}
+
 
 def parse_morph_note(note: str) -> int:
     """Map one free-text radiologist note to a MORPH_CLASSES index."""
@@ -268,6 +284,25 @@ def parse_morph_note(note: str) -> int:
     return MORPH_CLASSES["Normal"]
 
 
+def split_note_by_level(note: str) -> dict:
+    """Split one whole-patient note into {level: text} segments, each
+    running from that level's mention to the next level mention (or end
+    of note). Levels not mentioned are simply absent from the result."""
+    text = str(note)
+    matches = []
+    for level, pat in LEVEL_PATTERNS.items():
+        for m in pat.finditer(text):
+            matches.append((m.start(), level))
+    matches.sort()
+    if not matches:
+        return {}
+    segments = {level: [] for level in LEVEL_PATTERNS}
+    for i, (pos, level) in enumerate(matches):
+        end = matches[i + 1][0] if i + 1 < len(matches) else len(text)
+        segments[level].append(text[pos:end])
+    return {level: " ".join(parts) for level, parts in segments.items() if parts}
+
+
 class SudirmanDiscDataset(Dataset):
     """
     Sudirman et al. "Lumbar Spine MRI Dataset" (Mendeley, CC BY 4.0) +
@@ -276,13 +311,15 @@ class SudirmanDiscDataset(Dataset):
     disc levels (L3/L4, L4/L5, L5/S1 -- "sacral" per the project brief).
 
     Expects, under `root`:
-      images/<study_id>/*.dcm  (or .jpg)      -- from k57fr854j2
-      radiologist_notes.csv    -- columns: study_id, l3_l4, l4_l5, l5_s1
-                                   (free-text note per level), from s6bgczr8s2
+      images/<study_id>/*.dcm  (or .jpg)         -- from k57fr854j2
+      Radiologists Report.xlsx (sheet "Sheet1",
+      columns "Patient ID", "Clinician's Notes") -- from s6bgczr8s2
 
-    NOTE: this exact layout is the *expected* structure -- verify it
-    against the real download in Colab (see the notebook's inspection
-    cell) and adjust `_load_image`/the CSV column names here if different.
+    NOTE: the notes-file structure above is confirmed against the real
+    Mendeley download. The *images* layout (`images/<study_id>/*.dcm`)
+    is still the original best-effort guess -- verify it against the
+    real download in Colab (see the notebook's inspection cell) and
+    adjust `_load_image` here if the real folder/file layout differs.
     """
 
     def __init__(self, root, split="train", val_fraction=0.15,
@@ -290,12 +327,16 @@ class SudirmanDiscDataset(Dataset):
         self.root      = Path(root)
         self.transform = transform
         self.size      = image_size
-        self.notes     = pd.read_csv(self.root / "radiologist_notes.csv")
+        self.notes     = pd.read_excel(
+            self.root / "Radiologists Report.xlsx", sheet_name="Sheet1")
 
+        note_col = "Clinician's Notes"
+        segments = self.notes[note_col].map(split_note_by_level)
         self.morph_matrix = np.stack([
-            self.notes[level].map(parse_morph_note).fillna(0).astype(np.int64).values
-            if level in self.notes.columns
-            else np.zeros(len(self.notes), dtype=np.int64)
+            segments.map(
+                lambda segs, lvl=level: parse_morph_note(segs[lvl])
+                if lvl in segs else MORPH_CLASSES["Normal"]
+            ).astype(np.int64).values
             for level in MORPH_LEVELS
         ], axis=1)   # [N, 3]
 
@@ -327,7 +368,7 @@ class SudirmanDiscDataset(Dataset):
     def __getitem__(self, idx):
         real_idx = self.indices[idx]
         row      = self.notes.iloc[real_idx]
-        study_id = row["study_id"] if "study_id" in self.notes.columns else real_idx
+        study_id = row["Patient ID"] if "Patient ID" in self.notes.columns else real_idx
         img      = self._load_image(study_id)
         morph    = torch.tensor(self.morph_matrix[real_idx], dtype=torch.long)
         if self.transform:
