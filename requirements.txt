@@ -1,0 +1,47 @@
+﻿# Core deep learning (latest compatible versions)
+torch
+torchvision
+torchaudio
+lightning
+
+# Hugging Face
+datasets
+huggingface_hub
+transformers
+
+# Medical imaging
+monai
+nibabel
+pydicom
+SimpleITK
+
+# Computer vision and augmentation
+timm
+albumentations
+opencv-python
+
+# Data science
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+Pillow
+
+# XAI
+grad-cam
+shap
+captum
+
+# Deployment
+onnx
+onnxruntime
+
+# Utilities
+wandb
+rich
+tqdm
+PyYAML
+
+# Frontend
+streamlit

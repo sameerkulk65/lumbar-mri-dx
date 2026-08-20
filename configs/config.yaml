@@ -1,0 +1,98 @@
+project:
+  name: lumbar_mri_dx
+  seed: 42
+  output_dir: ./outputs
+  log_dir: ./logs
+
+data:
+  spider_hf_id: cdoswald/SPIDER
+  ud_medical_hf_id: ud-medical/Spine-MRI-Dataset
+  lumbar_hf_id: UniDataPro/lumbar-spine-mri
+  rsna_dir: ./data/rsna2024
+  # Sudirman et al. "Lumbar Spine MRI Dataset" (Mendeley, CC BY 4.0) +
+  # companion "Radiologists Notes" -- free alternative to the gated
+  # UniDataPro/ud-medical listings above. Populated in Colab.
+  sudirman_dir: ./data/sudirman
+  cache_dir: ./data/.cache
+  image_size: 512
+  num_workers: 0
+
+augmentation:
+  train:
+    horizontal_flip_p: 0.5
+    rotation_limit: 15
+    elastic_p: 0.3
+    clahe_p: 0.5
+    noise_p: 0.3
+  val:
+    enabled: false
+
+model:
+  backbone: mobilevitv2_100
+  fpn_channels: 256
+  num_det_classes: 8
+  num_seg_classes: 16
+  num_cls_tasks: 25
+  num_grades: 3
+  num_morph_levels: 3
+  num_morph_classes: 6
+  pretrained: true
+
+training:
+  epochs: 100
+  batch_size: 4
+  learning_rate: 0.0002
+  weight_decay: 0.0001
+  lambda_det: 0.5
+  lambda_seg: 1.5
+  lambda_cls: 1.0
+  lambda_morph: 1.0
+  precision: 32
+  gradient_clip: 1.0
+
+labels:
+  spider:
+    0: background
+    1: L1_vertebra
+    2: L2_vertebra
+    3: L3_vertebra
+    4: L4_vertebra
+    5: L5_vertebra
+    6: L1_IVD
+    7: L2_IVD
+    8: L3_IVD
+    9: L4_IVD
+    10: L5_IVD
+    11: spinal_canal
+  rsna:
+    conditions:
+      - spinal_canal_stenosis
+      - left_neural_foraminal_narrowing
+      - right_neural_foraminal_narrowing
+      - left_subarticular_stenosis
+      - right_subarticular_stenosis
+    levels:
+      - l1_l2
+      - l2_l3
+      - l3_l4
+      - l4_l5
+      - l5_s1
+    grades:
+      Normal/Mild: 0
+      Moderate: 1
+      Severe: 2
+  morphology:
+    # Disc-morphology taxonomy (distinct from the RSNA severity grades above).
+    # "Sacral" per the project brief = the L5/S1 level specifically, since
+    # the sacrum is one fused bone with no discs of its own beyond L5/S1.
+    levels:
+      - l3_l4
+      - l4_l5
+      - l5_s1
+    classes:
+      Normal: 0
+      Degenerated: 1
+      Bulging: 2
+      Herniated: 3
+      Thinning: 4
+      Disc Degeneration with Osteophyte formation: 5

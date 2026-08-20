@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+outputs/checkpoints/last.ckpt
+outputs/checkpoints/test_checkpoint.pt
+outputs/exports/
+outputs/xai/
+outputs/lumbar_mri_dx_train.zip
+logs/
+.cache/
