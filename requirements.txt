@@ -5,7 +5,7 @@ torchaudio
 lightning
 
 # Hugging Face
-datasets
+datasets==2.21.0  # newer versions dropped loading-script support, which cdoswald/SPIDER needs
 huggingface_hub
 transformers
 

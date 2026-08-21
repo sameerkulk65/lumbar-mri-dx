@@ -472,7 +472,7 @@ def build_dataloaders(cfg: dict):
     # Sudirman (disc morphology -- Normal/Degenerated/Bulging/Herniated/
     # Thinning/Osteophyte, incl. the L5/S1 "sacral" level)
     sudirman_dir = Path(cfg["data"]["sudirman_dir"])
-    if (sudirman_dir / "radiologist_notes.csv").exists():
+    if (sudirman_dir / "Radiologists Report.xlsx").exists():
         try:
             train_datasets.append(SudirmanDiscDataset(
                 str(sudirman_dir), split="train", transform=train_tfm,
