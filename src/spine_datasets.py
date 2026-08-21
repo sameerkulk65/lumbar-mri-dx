@@ -427,31 +427,37 @@ def build_dataloaders(cfg: dict):
     train_datasets = []
     val_datasets   = []
 
-    # SPIDER
-    try:
-        # Load once to get the full flat index
-        probe       = SPIDERDataset(cache_dir=cfg["data"]["cache_dir"])
-        total       = len(probe)
-        all_idx     = list(range(total))
-        random.seed(seed)
-        random.shuffle(all_idx)
-        n_val       = int(total * 0.15)
-        val_idx     = all_idx[:n_val]
-        trn_idx     = all_idx[n_val:]
+    # SPIDER -- set cfg["data"]["skip_spider"] = True to skip entirely (e.g.
+    # for a run focused on one head only, where SPIDER's ~9200 slices would
+    # otherwise dominate every batch and add several minutes of dataset
+    # download/generation before training even starts).
+    if cfg["data"].get("skip_spider", False):
+        console.print("[yellow]SPIDER skipped (skip_spider=True).[/yellow]")
+    else:
+        try:
+            # Load once to get the full flat index
+            probe       = SPIDERDataset(cache_dir=cfg["data"]["cache_dir"])
+            total       = len(probe)
+            all_idx     = list(range(total))
+            random.seed(seed)
+            random.shuffle(all_idx)
+            n_val       = int(total * 0.15)
+            val_idx     = all_idx[:n_val]
+            trn_idx     = all_idx[n_val:]
 
-        trn_spider  = SPIDERDataset(
-            cache_dir=cfg["data"]["cache_dir"],
-            transform=train_tfm, flat_indices=trn_idx)
-        val_spider  = SPIDERDataset(
-            cache_dir=cfg["data"]["cache_dir"],
-            transform=val_tfm,   flat_indices=val_idx)
+            trn_spider  = SPIDERDataset(
+                cache_dir=cfg["data"]["cache_dir"],
+                transform=train_tfm, flat_indices=trn_idx)
+            val_spider  = SPIDERDataset(
+                cache_dir=cfg["data"]["cache_dir"],
+                transform=val_tfm,   flat_indices=val_idx)
 
-        train_datasets.append(trn_spider)
-        val_datasets.append(val_spider)
-        console.print("[green]SPIDER added to dataloaders.[/green]")
-    except Exception as e:
-        console.print("[red]SPIDER failed:[/red] {}".format(e))
-        import traceback; traceback.print_exc()
+            train_datasets.append(trn_spider)
+            val_datasets.append(val_spider)
+            console.print("[green]SPIDER added to dataloaders.[/green]")
+        except Exception as e:
+            console.print("[red]SPIDER failed:[/red] {}".format(e))
+            import traceback; traceback.print_exc()
 
     # RSNA
     rsna_dir = Path(cfg["data"]["rsna_dir"])
