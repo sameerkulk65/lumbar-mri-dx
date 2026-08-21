@@ -311,15 +311,16 @@ class SudirmanDiscDataset(Dataset):
     disc levels (L3/L4, L4/L5, L5/S1 -- "sacral" per the project brief).
 
     Expects, under `root`:
-      images/<study_id>/*.dcm  (or .jpg)         -- from k57fr854j2
+      images/<batch-folder>/<patient_id, zero-padded>/<series>/*.ima
+                                                  -- from k57fr854j2
       Radiologists Report.xlsx (sheet "Sheet1",
       columns "Patient ID", "Clinician's Notes") -- from s6bgczr8s2
 
-    NOTE: the notes-file structure above is confirmed against the real
-    Mendeley download. The *images* layout (`images/<study_id>/*.dcm`)
-    is still the original best-effort guess -- verify it against the
-    real download in Colab (see the notebook's inspection cell) and
-    adjust `_load_image` here if the real folder/file layout differs.
+    Both the notes-file and images-folder structures above are confirmed
+    against the real Mendeley download (2026-08). `_load_image` picks
+    the T1-sagittal series specifically (a sagittal slice shows the
+    whole spine, covering all 3 morph levels in one image) and falls
+    back to any series found if no sagittal folder exists for a patient.
     """
 
     def __init__(self, root, split="train", val_fraction=0.15,
@@ -348,15 +349,34 @@ class SudirmanDiscDataset(Dataset):
             len(self.indices), split))
 
     def _load_image(self, study_id):
-        study_dir = self.root / "images" / str(study_id)
-        candidates = sorted(study_dir.glob("*.dcm")) if study_dir.exists() else []
+        # Real layout (confirmed 2026-08 against the actual Mendeley
+        # download): images/<batch-folder>/<patient_id, zero-padded>/
+        # <series-name>/*.ima -- one level deeper than the original
+        # images/<study_id>/*.dcm guess, with several MRI series per
+        # patient (localizer, T2 axial, T1 sagittal, T1 axial). We
+        # specifically want the T1 SAGITTAL series: a sagittal slice
+        # shows the whole spine in one image, which is what a single
+        # representative image per patient needs to cover L3/L4, L4/L5,
+        # and L5/S1 together. Siemens' .ima extension is DICOM-compatible
+        # -- pydicom reads it the same as .dcm.
+        study_id_str = str(study_id).zfill(4)
+        patient_dirs = [d for d in self.root.glob(f"images/**/{study_id_str}") if d.is_dir()]
+        if not patient_dirs:
+            return np.zeros((self.size, self.size, 3), dtype=np.uint8)
+        patient_dir = patient_dirs[0]
+
+        sag_dirs = [d for d in patient_dir.rglob("*") if d.is_dir() and "sag" in d.name.lower()]
+        search_root = sag_dirs[0] if sag_dirs else patient_dir
+
+        candidates = sorted(search_root.glob("*.ima")) or sorted(search_root.rglob("*.ima"))
+        candidates = candidates or sorted(search_root.glob("*.dcm")) or sorted(search_root.rglob("*.dcm"))
         if candidates:
             ds  = pydicom.dcmread(str(candidates[len(candidates) // 2]))
             arr = ds.pixel_array.astype(np.float32)
             arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8) * 255
             arr = cv2.resize(arr.astype(np.uint8), (self.size, self.size))
             return np.stack([arr, arr, arr], axis=-1)
-        jpgs = sorted(study_dir.glob("*.jpg")) if study_dir.exists() else []
+        jpgs = sorted(patient_dir.rglob("*.jpg"))
         if jpgs:
             img = cv2.imread(str(jpgs[len(jpgs) // 2]), cv2.IMREAD_GRAYSCALE)
             img = cv2.resize(img, (self.size, self.size))
