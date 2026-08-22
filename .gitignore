@@ -7,5 +7,7 @@ outputs/checkpoints/test_checkpoint.pt
 outputs/exports/
 outputs/xai/
 outputs/lumbar_mri_dx_train.zip
+outputs/lumbar_mri_dx_train/
+outputs/checkpoints/trained_state_dict_epoch*.pt
 logs/
 .cache/

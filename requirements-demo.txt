@@ -1,0 +1,15 @@
+# Minimal dependencies to run the Streamlit demo (inference only).
+# The full requirements.txt is for training and pulls in packages
+# (albumentations -> albucore -> stringzilla, datasets, monai, etc.)
+# that need a C++ compiler to build on some machines and aren't
+# imported anywhere on the inference path.
+
+streamlit
+torch
+timm
+numpy
+opencv-python
+matplotlib
+pandas
+PyYAML
+rich

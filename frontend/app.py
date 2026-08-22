@@ -318,8 +318,7 @@ if uploaded is not None:
         st.success("Analysis complete in {} ms".format(result["latency_ms"]))
         st.divider()
 
-        # FINDINGS
-        section_header("🩺", "Clinical Findings", "blue")
+        # SHARED FINDINGS SETUP
         findings = result["findings"]
 
         conditions = [
@@ -354,59 +353,82 @@ if uploaded is not None:
             nor = sum(1 for k in keys if findings.get(k, {}).get("grade") == "Normal/Mild")
             return sev, mod, nor, len(keys)
 
-        def render_morphology(levels):
-            region_morph = {lvl: morphology[lvl] for lvl in levels if lvl in morphology}
-            if not region_morph:
-                return
-            st.markdown("**Disc Morphology**")
-            morph_cols = st.columns(len(region_morph))
-            morph_palette = ["indigo", "violet", "pink"]
-            for i, (level, info) in enumerate(region_morph.items()):
-                stat_card(
-                    morph_cols[i],
-                    level,
-                    "{} ({:.0f}%)".format(info["type"], info["confidence"] * 100),
-                    morph_palette[i % len(morph_palette)],
-                )
-            morph_df = pd.DataFrame([
-                {"Level": level, "Type": info["type"],
-                 "Confidence": "{:.0f}%".format(info["confidence"] * 100)}
-                for level, info in region_morph.items()
-            ]).set_index("Level")
-            st.dataframe(morph_df.style.map(color_morph, subset=["Type"]),
-                         use_container_width=True)
+        st.caption(
+            "💡 **Confidence** (in parentheses) is the model's own certainty in its "
+            "predicted grade -- the probability it assigned to that answer versus "
+            "the alternatives. It reflects how sure the model felt, not a "
+            "verified-correct diagnosis."
+        )
 
-        tab_lumbar, tab_sacral = st.tabs(
-            ["🦵 Lumbar (L1/L2 - L4/L5)", "🦴 Sacral (L5/S1)"])
+        # PART 1: LUMBAR
+        section_header("🦵", "Lumbar (L1/L2 - L4/L5)", "blue")
+        sev, mod, nor, total = region_counts(LUMBAR_LEVELS)
+        m1, m2, m3, m4 = st.columns(4)
+        stat_card(m1, "Total findings", total, "indigo")
+        stat_card(m2, "Severe",   sev, "red")
+        stat_card(m3, "Moderate", mod, "amber")
+        stat_card(m4, "Normal",   nor, "green")
+        st.dataframe(
+            build_findings_df(LUMBAR_LEVELS).style.map(color_grade),
+            use_container_width=True)
 
-        with tab_lumbar:
-            sev, mod, nor, total = region_counts(LUMBAR_LEVELS)
-            m1, m2, m3, m4 = st.columns(4)
-            stat_card(m1, "Total findings", total, "indigo")
-            stat_card(m2, "Severe",   sev, "red")
-            stat_card(m3, "Moderate", mod, "amber")
-            stat_card(m4, "Normal",   nor, "green")
-            st.dataframe(
-                build_findings_df(LUMBAR_LEVELS).style.map(color_grade),
-                use_container_width=True)
-            if run_morphology:
-                render_morphology(LUMBAR_MORPH_LEVELS)
+        # PART 2: SACRAL
+        st.divider()
+        section_header("🦴", "Sacral (L5/S1)", "blue")
+        sev, mod, nor, total = region_counts(SACRAL_LEVELS)
+        m1, m2, m3, m4 = st.columns(4)
+        stat_card(m1, "Total findings", total, "indigo")
+        stat_card(m2, "Severe",   sev, "red")
+        stat_card(m3, "Moderate", mod, "amber")
+        stat_card(m4, "Normal",   nor, "green")
+        st.dataframe(
+            build_findings_df(SACRAL_LEVELS).style.map(color_grade),
+            use_container_width=True)
+        st.caption("L5/S1 is the \"sacral\" level per the project brief -- "
+                   "the sacrum is a single fused bone with no discs of its "
+                   "own beyond the L5/S1 junction.")
 
-        with tab_sacral:
-            sev, mod, nor, total = region_counts(SACRAL_LEVELS)
-            m1, m2, m3, m4 = st.columns(4)
-            stat_card(m1, "Total findings", total, "indigo")
-            stat_card(m2, "Severe",   sev, "red")
-            stat_card(m3, "Moderate", mod, "amber")
-            stat_card(m4, "Normal",   nor, "green")
-            st.dataframe(
-                build_findings_df(SACRAL_LEVELS).style.map(color_grade),
-                use_container_width=True)
-            if run_morphology:
-                render_morphology(SACRAL_MORPH_LEVELS)
-            st.caption("L5/S1 is the \"sacral\" level per the project brief -- "
-                       "the sacrum is a single fused bone with no discs of its "
-                       "own beyond the L5/S1 junction.")
+        # PART 3: DISC MORPHOLOGY
+        if run_morphology:
+            st.divider()
+            section_header("🧬", "Disc Morphology", "violet")
+            all_morph_levels = LUMBAR_MORPH_LEVELS + SACRAL_MORPH_LEVELS
+            region_morph = {lvl: morphology[lvl] for lvl in all_morph_levels if lvl in morphology}
+            if region_morph:
+                morph_cols = st.columns(len(region_morph))
+                morph_palette = ["indigo", "violet", "pink"]
+                for i, (level, info) in enumerate(region_morph.items()):
+                    stat_card(
+                        morph_cols[i],
+                        level,
+                        "{} ({:.0f}%)".format(info["type"], info["confidence"] * 100),
+                        morph_palette[i % len(morph_palette)],
+                    )
+                morph_df = pd.DataFrame([
+                    {"Level": level, "Type": info["type"],
+                     "Confidence": "{:.0f}%".format(info["confidence"] * 100)}
+                    for level, info in region_morph.items()
+                ]).set_index("Level")
+                st.dataframe(morph_df.style.map(color_morph, subset=["Type"]),
+                             use_container_width=True)
+                with st.expander("What do these mean?"):
+                    st.markdown(
+                        "**Disc Morphology** classifies each disc into one of six "
+                        "structural categories -- a different question from Clinical "
+                        "Findings' severity grade (\"how bad is it?\" vs \"what kind "
+                        "of change is it?\"):\n"
+                        "- **Normal** -- structurally healthy\n"
+                        "- **Degenerated** -- wear/breakdown, an early sign of disc aging\n"
+                        "- **Bulging** -- the disc has expanded outward beyond its normal boundary\n"
+                        "- **Herniated** -- disc material has pushed through a tear in its outer wall\n"
+                        "- **Thinning** -- loss of disc height/volume\n"
+                        "- **Disc Degeneration with Osteophyte formation** -- degeneration "
+                        "plus bone spurs forming at the disc edges\n\n"
+                        "The **percentage** is the model's confidence in its chosen "
+                        "category -- the share of its total probability placed on that "
+                        "one answer out of the six options. It reflects how sure the "
+                        "model felt, not a measured severity or a guarantee of correctness."
+                    )
 
         # GRADCAM
         if run_gradcam:
@@ -421,7 +443,6 @@ if uploaded is not None:
                 )
             st.pyplot(gcam_fig)
             plt.close()
-            st.caption("Warmer colours show where the model focused most.")
 
         # UNCERTAINTY
         if run_uncertainty:
@@ -443,6 +464,28 @@ if uploaded is not None:
                 st.warning("High uncertainty. Manual review strongly recommended.")
             else:
                 st.success("Model confidence acceptable for preliminary screening.")
+            with st.expander("What does this mean?"):
+                st.markdown(
+                    "**Uncertainty Analysis** answers a different question than the "
+                    "confidence percentages elsewhere: not \"what did the model "
+                    "decide?\" but \"how *stable* is that decision?\" It works by "
+                    "running the classification head repeatedly with dropout "
+                    "intentionally left active (normally dropout is switched off "
+                    "once a model is done training) -- this is called **MC-Dropout**. "
+                    "Since dropout randomly disables different neurons each run, the "
+                    "model gives a slightly different answer each time.\n\n"
+                    "The heatmap shows the **spread** (standard deviation) across "
+                    "those runs, per condition x level -- low spread means the model "
+                    "keeps landing on the same answer regardless of which neurons "
+                    "were dropped (stable); high spread means it's genuinely torn. "
+                    "This catches instability that a single confident-looking pass "
+                    "wouldn't reveal.\n\n"
+                    "**MC-Dropout passes** (the sidebar slider) controls how many of "
+                    "those repeated runs happen before computing the spread -- more "
+                    "passes give a smoother, more reliable estimate at the cost of "
+                    "roughly one extra second of compute per pass on CPU; fewer "
+                    "passes are faster but noisier."
+                )
 
         # FHIR
         if export_fhir:
