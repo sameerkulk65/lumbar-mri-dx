@@ -1,3 +1,4 @@
+import json
 import logging
 import random
 import re
@@ -240,6 +241,72 @@ class RSNASpineDataset(Dataset):
         }
 
 
+class RSNAHFDataset(Dataset):
+    """
+    GilbertKrantz/rsna-lumbar-spine-dataset (Hugging Face, ungated, ~362MB) --
+    an alternative to RSNASpineDataset above for when the real Kaggle
+    RSNA2024 competition files (train.csv + DICOM tree) aren't available
+    locally. Confirmed 2026-08 against the real parquet: 30,022 rows, ALL
+    5 conditions x 5 levels covered (not just one condition as an earlier
+    dataset-card summary suggested), one 128x128 PNG image per row with a
+    SINGLE (condition, level) grade label -- unlike the Kaggle format's one
+    row per study covering all 25 tasks at once.
+
+    Each sample here therefore supervises only the ONE task its image was
+    actually labeled for; the other 24 entries in the 25-length grade
+    vector are sentinel -1 (OrdinalClassificationLoss masks these out
+    per-task, same convention SPIDER/Sudirman rely on for their own
+    missing label types -- see MultiTaskLoss's docstring).
+    """
+    CONDITIONS = RSNASpineDataset.CONDITIONS
+    LEVELS     = RSNASpineDataset.LEVELS
+
+    def __init__(self, split="train", val_fraction=0.15, transform=None,
+                 image_size=512, seed=42, cache_dir="./data/.cache", fraction=1.0):
+        self.transform = transform
+        self.size      = image_size
+        self.raw = load_dataset(
+            "GilbertKrantz/rsna-lumbar-spine-dataset",
+            split="train", cache_dir=cache_dir)
+
+        rng     = np.random.default_rng(seed)
+        indices = rng.permutation(len(self.raw))
+        if fraction < 1.0:
+            indices = indices[: int(len(indices) * fraction)]
+        n_val   = int(len(indices) * val_fraction)
+        self.indices = (indices[:n_val] if split == "val" else indices[n_val:]).tolist()
+        console.print("[green]RSNA (HF):[/green] {} slices ({})".format(
+            len(self.indices), split))
+
+    def __len__(self): return len(self.indices)
+
+    def __getitem__(self, idx):
+        row = self.raw[self.indices[idx]]
+        arr = np.array(row["image"].convert("L"))
+        arr = cv2.resize(arr, (self.size, self.size))
+        img = np.stack([arr, arr, arr], axis=-1)
+
+        meta      = json.loads(row["metadata"])
+        level     = meta.get("level")
+        condition = row["condition"]
+        grades    = np.full(25, -1, dtype=np.int64)
+        if condition in self.CONDITIONS and level in self.LEVELS:
+            task_idx = self.CONDITIONS.index(condition) * 5 + self.LEVELS.index(level)
+            grades[task_idx] = int(row["label"])
+
+        if self.transform:
+            out   = self.transform(image=img, mask=np.zeros(img.shape[:2], dtype=np.uint8))
+            img_t = out["image"]
+        else:
+            img_t = torch.tensor(img, dtype=torch.float32).permute(2, 0, 1) / 255.0
+        return img_t, {
+            "source":       "rsna",
+            "seg_mask":     torch.full((512, 512), -1, dtype=torch.long),
+            "grades":       torch.tensor(grades, dtype=torch.long),
+            "morph_labels": torch.full((3,), -1, dtype=torch.long),
+        }
+
+
 # Keyword -> morph class, checked in this priority order (first match wins).
 # NOTE: tuned against the *expected* structure of the Sudirman "Radiologists
 # Notes" companion dataset (free-text per-level observations). The Colab
@@ -459,21 +526,41 @@ def build_dataloaders(cfg: dict):
             console.print("[red]SPIDER failed:[/red] {}".format(e))
             import traceback; traceback.print_exc()
 
-    # RSNA
-    rsna_dir = Path(cfg["data"]["rsna_dir"])
-    if (rsna_dir / "train.csv").exists():
+    # RSNA -- cfg["data"]["use_rsna_hf"] = True switches to the small,
+    # ungated Hugging Face dataset (30,022 individually-labeled slices,
+    # no local download/setup needed) instead of requiring the real
+    # Kaggle RSNA2024 competition files. cfg["data"]["rsna_hf_fraction"]
+    # (default 1.0) subsamples it for faster epochs.
+    if cfg["data"].get("use_rsna_hf", False):
+        frac = cfg["data"].get("rsna_hf_fraction", 1.0)
         try:
-            train_datasets.append(RSNASpineDataset(
-                str(rsna_dir), split="train", transform=train_tfm,
-                image_size=cfg["data"]["image_size"]))
-            val_datasets.append(RSNASpineDataset(
-                str(rsna_dir), split="val", transform=val_tfm,
-                image_size=cfg["data"]["image_size"]))
-            console.print("[green]RSNA added to dataloaders.[/green]")
+            train_datasets.append(RSNAHFDataset(
+                split="train", cache_dir=cfg["data"]["cache_dir"],
+                transform=train_tfm, image_size=cfg["data"]["image_size"],
+                fraction=frac))
+            val_datasets.append(RSNAHFDataset(
+                split="val", cache_dir=cfg["data"]["cache_dir"],
+                transform=val_tfm, image_size=cfg["data"]["image_size"],
+                fraction=frac))
+            console.print("[green]RSNA (HF) added to dataloaders.[/green]")
         except Exception as e:
-            console.print("[red]RSNA failed:[/red] {}".format(e))
+            console.print("[red]RSNA (HF) failed:[/red] {}".format(e))
+            import traceback; traceback.print_exc()
     else:
-        console.print("[yellow]RSNA not found - skipping.[/yellow]")
+        rsna_dir = Path(cfg["data"]["rsna_dir"])
+        if (rsna_dir / "train.csv").exists():
+            try:
+                train_datasets.append(RSNASpineDataset(
+                    str(rsna_dir), split="train", transform=train_tfm,
+                    image_size=cfg["data"]["image_size"]))
+                val_datasets.append(RSNASpineDataset(
+                    str(rsna_dir), split="val", transform=val_tfm,
+                    image_size=cfg["data"]["image_size"]))
+                console.print("[green]RSNA added to dataloaders.[/green]")
+            except Exception as e:
+                console.print("[red]RSNA failed:[/red] {}".format(e))
+        else:
+            console.print("[yellow]RSNA not found - skipping.[/yellow]")
 
     # Sudirman (disc morphology -- Normal/Degenerated/Bulging/Herniated/
     # Thinning/Osteophyte, incl. the L5/S1 "sacral" level)
